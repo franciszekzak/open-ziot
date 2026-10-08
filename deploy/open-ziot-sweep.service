@@ -1,0 +1,13 @@
+[Unit]
+Description=Open ZIOT oldest-video retention sweep
+[Service]
+Type=oneshot
+User=openziot
+WorkingDirectory=/opt/open-ziot
+ExecStart=/usr/bin/python3 /opt/open-ziot/camera_sweep.py --config /etc/open-ziot/config.json
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/open-ziot
+PrivateTmp=true
+UMask=0077

@@ -1,0 +1,8 @@
+[Unit]
+Description=Daily Open ZIOT retention
+[Timer]
+OnCalendar=*-*-* 03:00:00 Europe/Warsaw
+Persistent=true
+Unit=open-ziot-sweep.service
+[Install]
+WantedBy=timers.target

@@ -1,0 +1,20 @@
+[Unit]
+Description=Open ZIOT stock camera receiver
+After=network-online.target
+Wants=network-online.target
+[Service]
+User=openziot
+WorkingDirectory=/opt/open-ziot
+ExecStart=/usr/bin/python3 -u /opt/open-ziot/camera_service.py --config /etc/open-ziot/config.json
+Restart=always
+RestartSec=3
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/open-ziot
+PrivateTmp=true
+UMask=0077
+MemoryMax=512M
+TimeoutStopSec=330
+[Install]
+WantedBy=multi-user.target

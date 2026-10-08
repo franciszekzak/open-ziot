@@ -1,0 +1,10 @@
+.git
+android
+tests
+docs
+config
+data
+recordings
+**/__pycache__
+*.apk
+*.jks

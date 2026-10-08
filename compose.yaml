@@ -1,0 +1,25 @@
+services:
+  receiver:
+    build: .
+    network_mode: host
+    restart: unless-stopped
+    volumes:
+      - ./config:/config:ro
+      - camera-data:/data
+    security_opt:
+      - no-new-privileges:true
+    cap_drop: [ALL]
+    mem_limit: 512m
+    stop_grace_period: 330s
+  sweep:
+    build: .
+    profiles: [maintenance]
+    command: [python, /app/camera_sweep.py, --config, /config/config.json]
+    volumes:
+      - ./config:/config:ro
+      - camera-data:/data
+    security_opt:
+      - no-new-privileges:true
+    cap_drop: [ALL]
+volumes:
+  camera-data:

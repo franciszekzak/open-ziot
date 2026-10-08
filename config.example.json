@@ -1,0 +1,15 @@
+{
+  "uid": "111111111111",
+  "public_ip": "203.0.113.10",
+  "public_url": "https://camera.example.org/cat-camera/",
+  "username": "camera",
+  "password_sha256": "REPLACE_USING_INIT_CONFIG",
+  "signaling_port": 18882,
+  "stun_port": 18883,
+  "rtp_port": 18884,
+  "http_port": 18886,
+  "http_bind": "127.0.0.1",
+  "ingest_bind": "0.0.0.0",
+  "data_dir": "/data",
+  "storage_limit_gib": 2
+}

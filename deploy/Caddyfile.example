@@ -1,0 +1,6 @@
+camera.example.org {
+    redir /cat-camera /cat-camera/
+    handle_path /cat-camera/* {
+        reverse_proxy 127.0.0.1:18886
+    }
+}

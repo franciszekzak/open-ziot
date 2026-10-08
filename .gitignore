@@ -1,0 +1,15 @@
+config/
+config.json
+data/
+recordings/
+*.jks
+*.keystore
+*.apk
+*.aab
+*.pyc
+__pycache__/
+android/.gradle/
+android/local.properties
+**/build/
+.cache/
+.ruff_cache/
