@@ -22,6 +22,8 @@ SD card is needed. The camera does need continuous USB power and working Wi-Fi.
 
 - Android BLE discovery and setup: Wi-Fi credentials, signaling host/port and UTC offset.
 - HTTPS viewer in the app or a browser; existing username/password authentication.
+- Alternative browser login form at `https://your-host/cat-camera/login` if a
+  mobile browser stalls at the HTTP Basic login popup (use your configured viewer path).
 - Live JPEG video and PCMU microphone playback after tapping **Enable audio**.
 - Server-side manual recording, motion/noise triggers and timed JPEG snapshots.
 - H.264/AAC MP4 clips; authenticated preview, download, seek and delete.
@@ -167,6 +169,7 @@ pip install -r server/requirements.txt
 python tests/test_server.py
 python tests/test_recorder.py
 python tests/test_sweep.py
+node tests/test_viewer.cjs
 ```
 
 ffmpeg/ffprobe are required. The server supports Linux/Python 3.10+; retention

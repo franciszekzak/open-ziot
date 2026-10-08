@@ -3,6 +3,7 @@
 import base64, functools, hashlib, io, json, operator, socket, struct, subprocess, sys, tempfile, time, unittest
 from pathlib import Path
 import urllib.request, urllib.error
+from http.client import HTTPConnection
 from PIL import Image
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -112,6 +113,53 @@ class ReceiverTest(unittest.TestCase):
                     with self.assertRaises(urllib.error.HTTPError) as error:
                         get("/audio.json", False)
                     self.assertEqual(error.exception.code, 401)
+                    self.assertEqual(error.exception.headers["Content-Length"], "0")
+                    self.assertEqual(error.exception.headers["Cache-Control"], "no-store")
+                    self.assertEqual(error.exception.read(), b"")
+                    with get("/login", False) as response:
+                        self.assertIn(b'autocomplete="current-password"', response.read())
+
+                    # Exercise the mobile form without HTTP Basic credentials.
+                    connection = HTTPConnection("127.0.0.1", http, timeout=3)
+
+                    def login(body, request_origin=origin):
+                        connection.request(
+                            "POST",
+                            "/login",
+                            body,
+                            {
+                                "Content-Type": "application/x-www-form-urlencoded",
+                                "Origin": request_origin,
+                            },
+                        )
+                        response = connection.getresponse()
+                        response.read()
+                        return response
+
+                    self.assertEqual(login("username=test&password=wrong").status, 403)
+                    self.assertEqual(
+                        login(
+                            "username=test&password=test-password", "https://wrong.example"
+                        ).status,
+                        403,
+                    )
+                    response = login("username=test&password=test-password")
+                    self.assertEqual(response.status, 303)
+                    self.assertEqual(response.getheader("Location"), "/")
+                    cookie = response.getheader("Set-Cookie")
+                    self.assertIn("HttpOnly", cookie)
+                    self.assertIn("SameSite=Strict", cookie)
+                    session = cookie.split(";", 1)[0]
+                    for target in ("/", "/recording.json", "/files.json"):
+                        connection.request("GET", target, headers={"Cookie": session})
+                        response = connection.getresponse()
+                        self.assertEqual(response.status, 200)
+                        response.read()
+                    connection.request("GET", "/", headers={"Cookie": session + "tampered"})
+                    response = connection.getresponse()
+                    self.assertEqual(response.status, 401)
+                    response.read()
+                    connection.close()
                     with socket.create_connection(("127.0.0.1", tcp), timeout=3) as signaling:
                         signaling.sendall(cloud(1, 1, b"test-firmware\0"))
                         raw = signaling.recv(4096)

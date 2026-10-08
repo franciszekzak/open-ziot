@@ -1,6 +1,8 @@
 """Configurable stock X5 receiver and authenticated browser viewer."""
 
 import argparse, ipaddress, os, asyncio, base64, functools, hashlib, hmac, json, operator, re, signal, socket, struct, threading, time
+import secrets
+from http.cookies import SimpleCookie, CookieError
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from collections import deque
@@ -35,6 +37,9 @@ url = urlsplit(CONFIG["public_url"])
 if url.scheme not in ("http", "https") or not url.netloc or url.username or url.password:
     raise ValueError("Invalid public_url")
 ORIGIN = url.scheme + "://" + url.netloc
+VIEWER_PATH = url.path.rstrip("/") + "/"
+SESSION_KEY = secrets.token_bytes(32)
+SESSION_SECONDS = 12 * 60 * 60
 if len(CONFIG["public_ip"].encode()) > 20:
     raise ValueError("Invalid advertised IP")
 if not re.fullmatch("[0-9a-f]{64}", CONFIG["password_sha256"]):
@@ -76,27 +81,111 @@ HTML = (BASE / "viewer.html").read_bytes()
 
 
 class Viewer(BaseHTTPRequestHandler):
+    def valid_credentials(self, username, password):
+        return hmac.compare_digest(username, CONFIG["username"].encode()) and hmac.compare_digest(
+            hashlib.sha256(password).hexdigest(), CONFIG["password_sha256"]
+        )
+
+    def valid_session(self):
+        try:
+            header = self.headers.get("Cookie", "")
+            if len(header) > 4096:
+                return False
+            cookie = SimpleCookie(header)
+            value = cookie["open_ziot_session"].value
+            payload, signature = value.rsplit(".", 1)
+            expiry, nonce = payload.split(".", 1)
+            if not re.fullmatch(r"[0-9a-f]{32}", nonce):
+                return False
+            now = time.time()
+            return now < int(expiry) <= now + SESSION_SECONDS and hmac.compare_digest(
+                signature, hmac.new(SESSION_KEY, payload.encode(), hashlib.sha256).hexdigest()
+            )
+        except (KeyError, ValueError, TypeError, CookieError):
+            return False
+
     def authenticated(self):
+        if self.valid_session():
+            return True
         auth = self.headers.get("Authorization", "")
         try:
             if not auth.startswith("Basic ") or len(auth) > 2048:
                 raise ValueError()
             credentials = base64.b64decode(auth[6:], validate=True)
             username, password = credentials.split(b":", 1)
-            valid = hmac.compare_digest(
-                username, CONFIG["username"].encode()
-            ) and hmac.compare_digest(
-                hashlib.sha256(password).hexdigest(), CONFIG["password_sha256"]
-            )
+            valid = self.valid_credentials(username, password)
         except (ValueError, TypeError):
             valid = False
         if not valid:
             self.send_response(401)
             self.send_header("WWW-Authenticate", 'Basic realm="Open ZIOT", charset="UTF-8"')
+            self.send_header("Content-Length", "0")
+            self.send_header("Cache-Control", "no-store")
             self.end_headers()
         return valid
 
+    def login_page(self, failed=False):
+        body = (
+            """<!doctype html><html lang="en"><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1"><title>Sign in · Open ZIOT</title>
+<style>body{background:#10161e;color:#eff4f8;font:16px system-ui;margin:0}main{max-width:380px;margin:60px auto;padding:24px}label{display:block;margin:20px 0}input,button{box-sizing:border-box;width:100%;font:inherit;padding:12px;border-radius:6px;border:1px solid #52657c}input{display:block;margin-top:8px;background:#182330;color:#fff}button{background:#243449;color:#fff}p{color:#aab7c4}</style>
+<main><h1>Open ZIOT</h1><p>Sign in to view your camera.</p>"""
+            + ('<p role="alert">Incorrect username or password.</p>' if failed else "")
+            + """<form method="post"><label>Username<input name="username" autocomplete="username" required maxlength="256"></label>
+<label>Password<input name="password" type="password" autocomplete="current-password" required maxlength="1024"></label>
+<button type="submit">Sign in</button></form></main></html>"""
+        ).encode()
+        self.send_response(403 if failed else 200)
+        self.send_header("Content-Type", "text/html; charset=utf-8")
+        self.send_header("Content-Length", str(len(body)))
+        self.send_header("Cache-Control", "no-store")
+        self.send_header("X-Content-Type-Options", "nosniff")
+        self.send_header(
+            "Content-Security-Policy",
+            "default-src 'none'; style-src 'unsafe-inline'; form-action 'self'; frame-ancestors 'none'; base-uri 'none'",
+        )
+        self.end_headers()
+        self.wfile.write(body)
+
+    def login(self):
+        if (
+            self.headers.get("Origin") != ORIGIN
+            or self.headers.get("Content-Type", "").split(";", 1)[0]
+            != "application/x-www-form-urlencoded"
+        ):
+            self.send_error(403)
+            return
+        try:
+            length = int(self.headers.get("Content-Length", "0"))
+            if not 0 < length <= 4096:
+                raise ValueError()
+            form = parse_qs(self.rfile.read(length).decode(), max_num_fields=4)
+            username = form.get("username", [""])[0].encode()
+            password = form.get("password", [""])[0].encode()
+            if not self.valid_credentials(username, password):
+                return self.login_page(failed=True)
+        except (ValueError, UnicodeError):
+            self.send_error(400)
+            return
+        payload = str(int(time.time()) + SESSION_SECONDS) + "." + secrets.token_hex(16)
+        value = payload + "." + hmac.new(SESSION_KEY, payload.encode(), hashlib.sha256).hexdigest()
+        cookie = SimpleCookie()
+        cookie["open_ziot_session"] = value
+        cookie["open_ziot_session"]["path"] = VIEWER_PATH
+        cookie["open_ziot_session"]["httponly"] = True
+        cookie["open_ziot_session"]["secure"] = url.scheme == "https"
+        cookie["open_ziot_session"]["samesite"] = "Strict"
+        cookie["open_ziot_session"]["max-age"] = SESSION_SECONDS
+        self.send_response(303)
+        self.send_header("Location", VIEWER_PATH)
+        self.send_header("Set-Cookie", cookie["open_ziot_session"].OutputString())
+        self.send_header("Content-Length", "0")
+        self.send_header("Cache-Control", "no-store")
+        self.end_headers()
+
     def do_GET(self):
+        if urlsplit(self.path).path == "/login":
+            return self.login_page()
         if not self.authenticated():
             return
         parsed = urlsplit(self.path)
@@ -233,6 +322,8 @@ class Viewer(BaseHTTPRequestHandler):
             pass
 
     def do_POST(self):
+        if self.path == "/login":
+            return self.login()
         if not self.authenticated():
             return
         if (
